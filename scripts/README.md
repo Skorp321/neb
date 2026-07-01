@@ -23,31 +23,62 @@ export HF_HOME="$PWD/../.hf_home"   # общий кеш модели во все
 
 ## Задача 1 — Окружение и данные
 
+Обёртки вызывают реальные скрипты из склонированного репозитория speculators
+(`speculators/scripts/*.py`). Ключевое: сервер извлечения hidden states — это
+**vLLM** (`launch_vllm.py` → `python -m vllm ... --speculative_config
+extract_hidden_states`), он живёт в **`vllm_venv`**; а `prepare_data.py` и
+`data_generation_offline.py` (openai-клиент по HTTP) — в **`speculators_venv`**.
+Два процесса общаются по HTTP (`--endpoint`). vLLM 0.20.0 подходит (нужно ≥0.18).
+
 ```bash
+# 1) Скачать + отфильтровать ShareGPT в .jsonl (формат совместим со speculators)
 source speculators_venv/bin/activate
 python prepare_data.py --model Qwen/Qwen3-8B --max-samples 3000 --seq-len 2048 \
        --out data/sharegpt_qwen3.jsonl
+
+# 2) preprocess + hidden states. По умолчанию сервер поднимается автоматически
+#    через ./vllm_venv/bin/python; hidden states -> output/hidden_states
 python generate_hidden_states.py --model Qwen/Qwen3-8B \
-       --data data/sharegpt_qwen3.jsonl --out data/hidden_states --min-free-gb 20
+       --data data/sharegpt_qwen3.jsonl --work-dir output \
+       --seq-length 2048 --max-samples 3000 --concurrency 32 --min-free-gb 20
 deactivate
+```
+
+Вариант с двумя терминалами (эквивалент, если авто-запуск не подходит):
+
+```bash
+# Терминал A (vllm_venv): сервер извлечения hidden states
+source vllm_venv/bin/activate
+python launch_vllm.py Qwen/Qwen3-8B --port 8000
+
+# Терминал B (speculators_venv): preprocess + генерация против готового сервера
+source speculators_venv/bin/activate
+python generate_hidden_states.py --model Qwen/Qwen3-8B \
+       --data data/sharegpt_qwen3.jsonl --work-dir output \
+       --seq-length 2048 --max-samples 3000 --no-manage-server \
+       --endpoint http://localhost:8000/v1
 ```
 
 Следите за `df -h` — hidden states ≈ ~140GB. При нехватке диска сначала снижайте
 `--max-samples`. Ошибка «missing temporary file» → скрипт сам чистит
-`/tmp/hidden_states/*`. Несовпадение seq-len → проверьте версию vLLM.
+`/tmp/hidden_states/*`. Несовпадение seq-len ловит `--validate-outputs`; если
+падает — проверьте версию vLLM.
 
 ## Задача 2 — Обучение draft-головы EAGLE-3
 
 ```bash
 source speculators_venv/bin/activate
 python train_eagle3.py --verifier Qwen/Qwen3-8B \
-       --hidden-states data/hidden_states \
-       --out output/checkpoints --epochs 5 --log-positionwise
+       --data-path output --hidden-states output/hidden_states \
+       --save-path output/checkpoints --epochs 5 --total-seq-len 2048 \
+       --on-missing raise --logger tensorboard
 deactivate
 ```
 
-Лучший чекпоинт линкуется в `output/checkpoints/best`. Ориентир:
-`full_acc_0 ≈ 0.46`, падает по позициям. Низкий `full_acc_0` → чинить Задачу 1.
+Обёртка запускает `torchrun scripts/train.py`. Чекпоинты — под
+`output/checkpoints/` (лучший сохраняет сам тренер, обычно `best/`). Ориентир:
+`full_acc_0 ≈ 0.46`, падает по позициям (метрики — в `--log-dir logs`). Низкий
+`full_acc_0` → чинить Задачу 1.
 
 ## Задача 3 — FP8 dynamic квантизация
 

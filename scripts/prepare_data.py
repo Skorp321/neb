@@ -26,9 +26,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 from pathlib import Path
 
-from datasets import load_dataset
 from transformers import AutoTokenizer
 
 # ShareGPT role strings vary across mirrors; normalize them here.
@@ -47,6 +47,13 @@ def parse_args() -> argparse.Namespace:
                    help="Tokenizer/verifier model id used for the chat template.")
     p.add_argument("--dataset", default="anon8231489123/ShareGPT_Vicuna_unfiltered",
                    help="HF dataset id with ShareGPT-style conversations.")
+    p.add_argument("--data-file",
+                   default="ShareGPT_V3_unfiltered_cleaned_split.json",
+                   help="Raw JSON array file inside the dataset repo. Many "
+                        "ShareGPT repos ship a single big JSON that load_dataset "
+                        "cannot auto-detect; we download this file directly. "
+                        "Pass an empty string ('') to use the datasets loader "
+                        "instead (for parquet-based repos).")
     p.add_argument("--dataset-split", default="train")
     p.add_argument("--conversations-key", default="conversations",
                    help="Field holding the list of turns in each record.")
@@ -75,6 +82,34 @@ def normalize_turns(raw_turns: list[dict]) -> list[dict] | None:
     return turns or None
 
 
+def iter_records(args: argparse.Namespace):
+    """Yield raw conversation records from either a raw JSON file or datasets.
+
+    Raw-JSON ShareGPT repos (e.g. anon8231489123/ShareGPT_Vicuna_unfiltered)
+    store one big JSON array in a single file that ``load_dataset`` cannot
+    auto-infer, so we download that file with ``hf_hub_download`` and iterate it.
+    For parquet-based repos, pass ``--data-file ''`` to use the streaming
+    ``datasets`` loader instead.
+    """
+    if args.data_file:
+        from huggingface_hub import hf_hub_download
+        print(f"==> Downloading raw JSON {args.dataset}:{args.data_file}")
+        local = hf_hub_download(repo_id=args.dataset, filename=args.data_file,
+                                repo_type="dataset")
+        print(f"==> Loading {local} into memory")
+        with open(local, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        random.Random(args.seed).shuffle(data)
+        yield from data
+        return
+
+    from datasets import load_dataset
+    print(f"==> Streaming dataset {args.dataset}:{args.dataset_split}")
+    ds = load_dataset(args.dataset, split=args.dataset_split, streaming=True)
+    ds = ds.shuffle(seed=args.seed, buffer_size=10_000)
+    yield from ds
+
+
 def main() -> None:
     args = parse_args()
     out_path = Path(args.out)
@@ -83,9 +118,7 @@ def main() -> None:
     print(f"==> Loading tokenizer for {args.model}")
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
-    print(f"==> Streaming dataset {args.dataset}:{args.dataset_split}")
-    ds = load_dataset(args.dataset, split=args.dataset_split, streaming=True)
-    ds = ds.shuffle(seed=args.seed, buffer_size=10_000)
+    ds = iter_records(args)
 
     kept = 0
     scanned = 0

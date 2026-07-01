@@ -1,62 +1,61 @@
 #!/usr/bin/env python3
-"""Task 1 helper: launch a vLLM OpenAI-compatible server.
+"""Task 1 helper: launch the vLLM server for offline hidden-state extraction.
 
-The offline EAGLE-3 tutorial ships its own ``scripts/launch_vllm.py``. This is a
-thin, self-contained equivalent so the pipeline works even if the cloned repo's
-copy moves. It simply shells out to ``vllm serve`` with the flags we need for
-hidden-state generation (Task 1) and can be reused for benchmarking (Task 4).
+Hidden-state generation requires a vLLM instance configured to return hidden
+states. That special configuration lives in the speculators repo's own
+``scripts/launch_vllm.py`` (invocation: ``launch_vllm.py MODEL -- <vllm args>``).
+This thin shim just execs that script so the extraction config is always
+correct, regardless of vLLM version.
 
-Run inside vllm_venv:
+Run inside vllm_venv (the extraction server needs vLLM, which is NOT installed
+in speculators_venv):
 
     source vllm_venv/bin/activate
-    python launch_vllm.py --model Qwen/Qwen3-8B --port 8000
+    python launch_vllm.py Qwen/Qwen3-8B --port 8000
+    # forward extra vLLM flags after --:
+    python launch_vllm.py Qwen/Qwen3-8B --port 8000 -- --gpu-memory-utilization 0.9
 
-Prefer serve.sh for the Task 4 benchmark configs; this script exists mainly for
-the data-generation step, which needs a plain BF16 server.
+generate_hidden_states.py can start this for you (it points at
+vllm_venv/bin/python); run it manually only for debugging or when using
+generate_hidden_states.py --no-manage-server.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
+
+DEFAULT_REPO = Path(__file__).resolve().parent / "speculators"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model", default="Qwen/Qwen3-8B")
-    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("model", help="Verifier model id/path, e.g. Qwen/Qwen3-8B.")
+    p.add_argument("--repo", default=str(DEFAULT_REPO),
+                   help="Path to the cloned speculators repo (has scripts/).")
     p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--max-model-len", type=int, default=4096)
-    p.add_argument("--gpu-memory-utilization", type=float, default=0.9)
-    p.add_argument("--dtype", default="bfloat16")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--no-enable-prefix-caching", action="store_true",
-                   help="Disable prefix caching (recommended for clean benchmarks).")
     p.add_argument("extra", nargs=argparse.REMAINDER,
-                   help="Extra args forwarded verbatim to 'vllm serve'.")
+                   help="Extra vLLM args after -- (forwarded verbatim).")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    cmd = [
-        "vllm", "serve", args.model,
-        "--host", args.host,
-        "--port", str(args.port),
-        "--max-model-len", str(args.max_model_len),
-        "--gpu-memory-utilization", str(args.gpu_memory_utilization),
-        "--dtype", args.dtype,
-        "--seed", str(args.seed),
-    ]
-    if args.no_enable_prefix_caching:
-        cmd.append("--no-enable-prefix-caching")
-    # argparse.REMAINDER keeps a leading "--"; drop it if present.
-    extra = args.extra[1:] if args.extra[:1] == ["--"] else args.extra
-    cmd.extend(extra)
+    repo_script = Path(args.repo) / "scripts" / "launch_vllm.py"
+    if not repo_script.exists():
+        sys.exit(f"ERROR: {repo_script} not found. Set --repo to the cloned "
+                 "speculators repo (env_setup.sh clones it next to this script).")
 
+    # argparse.REMAINDER keeps the leading "--"; drop it if present.
+    extra = args.extra[1:] if args.extra[:1] == ["--"] else args.extra
+    # speculators expects: launch_vllm.py MODEL -- <vllm args...>
+    cmd = [sys.executable, str(repo_script), args.model, "--",
+           "--port", str(args.port), *extra]
     print("==> Launching:", " ".join(shlex.quote(c) for c in cmd), flush=True)
-    return subprocess.call(cmd)
+    return subprocess.call(cmd, cwd=args.repo)
 
 
 if __name__ == "__main__":
