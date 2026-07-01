@@ -75,14 +75,17 @@ def build_command(args: argparse.Namespace) -> list[str]:
     if not train_py.exists():
         sys.exit(f"ERROR: {train_py} not found. Set --repo to the cloned "
                  "speculators repo (env_setup.sh clones it).")
-    hs = args.hidden_states or str(Path(args.data_path) / "hidden_states")
+    # train.py runs with cwd=repo, so all user paths must be absolute.
+    data_path = Path(args.data_path).resolve()
+    hs = Path(args.hidden_states).resolve() if args.hidden_states \
+        else data_path / "hidden_states"
     cmd = [
         "torchrun", "--standalone", f"--nproc_per_node={args.nproc}",
         str(train_py),
         "--verifier-name-or-path", args.verifier,
-        "--data-path", args.data_path,
-        "--hidden-states-path", hs,
-        "--save-path", args.save_path,
+        "--data-path", str(data_path),
+        "--hidden-states-path", str(hs),
+        "--save-path", str(Path(args.save_path).resolve()),
         "--epochs", str(args.epochs),
         "--lr", str(args.lr),
         "--total-seq-len", str(args.total_seq_len),
@@ -91,7 +94,8 @@ def build_command(args: argparse.Namespace) -> list[str]:
     if args.draft_vocab_size is not None:
         cmd += ["--draft-vocab-size", str(args.draft_vocab_size)]
     if args.logger:
-        cmd += ["--logger", args.logger, "--log-dir", args.log_dir]
+        cmd += ["--logger", args.logger,
+                "--log-dir", str(Path(args.log_dir).resolve())]
     if args.run_name:
         cmd += ["--run-name", args.run_name]
     return cmd

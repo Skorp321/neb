@@ -28,6 +28,21 @@ echo "==> Using python: $($PYTHON --version)"
 echo "==> HF_HOME: $HF_HOME"
 mkdir -p "$HF_HOME"
 
+# --- 0. System prerequisites ------------------------------------------------
+# Triton (used by vLLM/torch.compile) compiles a small C extension at runtime
+# and needs the Python dev headers + a C compiler. Without them the vLLM
+# server dies at startup with: "fatal error: Python.h: No such file or directory".
+PY_INCLUDE="$($PYTHON -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
+if [[ ! -f "$PY_INCLUDE/Python.h" ]]; then
+  echo "ERROR: Python dev headers not found ($PY_INCLUDE/Python.h missing)." >&2
+  echo "       Install them first:  sudo apt-get install -y python3.12-dev" >&2
+  exit 1
+fi
+if ! command -v gcc >/dev/null; then
+  echo "ERROR: gcc not found. Install it first:  sudo apt-get install -y build-essential" >&2
+  exit 1
+fi
+
 # --- 1. speculators_venv (editable install from source, pinned tag) --------
 if [[ ! -d speculators_venv ]]; then
   echo "==> Creating speculators_venv"
