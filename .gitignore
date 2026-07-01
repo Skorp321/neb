@@ -1,3 +1,10 @@
 hw3-nebius-124815-Skorp321.pem
 hw3-nebius-124815-Skorp321.pem.ppk
 .qodo
+.hf_home
+neb/scripts/comp_venv
+neb/scripts/data
+neb/scripts/output
+neb/scripts/speculators
+neb/scripts/speculators_venv
+neb/scripts/vllm_venv
