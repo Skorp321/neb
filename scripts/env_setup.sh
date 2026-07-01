@@ -61,6 +61,8 @@ pip install -e ./speculators
 # Extras used by prepare_data.py (dataset download + Qwen3 chat template).
 # transformers/torch normally come with speculators; datasets often does not.
 # pip install "datasets>=2.18" "transformers>=4.44" huggingface_hub
+# train.py --logger tensorboard imports torch.utils.tensorboard -> needs the pkg.
+pip install tensorboard
 deactivate
 
 # --- 2. vllm_venv (serving + benchmark runtime) ----------------------------

@@ -151,6 +151,9 @@ def preprocess(args: argparse.Namespace, work: Path) -> None:
         "--output", str(work.resolve()),
         "--seq-length", str(args.seq_length),
         "--max-samples", str(args.max_samples),
+        # Keep token_freq.pt inside work-dir (default lands in cwd); train.py
+        # looks for it there when --draft-vocab-size is used.
+        "--token-freq-path", str((work / "token_freq.pt").resolve()),
     ]
     run(cmd, args.dry_run, cwd=args.repo)
 

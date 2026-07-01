@@ -44,7 +44,9 @@ def main() -> int:
                  "choose another --out; refusing to overwrite.")
 
     try:
-        from llmcompressor.transformers import oneshot
+        # llmcompressor >= 0.6 exposes oneshot at the package root
+        # (llmcompressor.transformers.oneshot is the old <=0.5 location).
+        from llmcompressor import oneshot
         from llmcompressor.modifiers.quantization import QuantizationModifier
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:  # pragma: no cover - environment guard
