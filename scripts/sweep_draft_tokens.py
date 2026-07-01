@@ -86,6 +86,50 @@ def parse_metrics(text: str) -> dict[str, float]:
     return out
 
 
+def fetch_spec_metrics(port: int) -> dict[str, float]:
+    """Scrape speculative-decoding counters from the server's /metrics.
+
+    `vllm bench serve` does not print acceptance rate; the report table needs
+    drafts / draft tokens / accepted tokens, so pull the Prometheus counters
+    before the server is stopped.
+    """
+    url = f"http://127.0.0.1:{port}/metrics"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            text = resp.read().decode()
+    except Exception as exc:
+        print(f"==> WARNING: could not scrape {url}: {exc}", file=sys.stderr)
+        return {}
+
+    def counter(prefix: str) -> float | None:
+        total, found = 0.0, False
+        for line in text.splitlines():
+            # e.g. vllm:spec_decode_num_draft_tokens_total{...} 28176.0
+            if line.startswith(prefix):
+                try:
+                    total += float(line.rsplit(" ", 1)[1])
+                    found = True
+                except (ValueError, IndexError):
+                    continue
+        return total if found else None
+
+    drafts = counter("vllm:spec_decode_num_drafts")
+    draft_tokens = counter("vllm:spec_decode_num_draft_tokens")
+    accepted = counter("vllm:spec_decode_num_accepted_tokens")
+    out: dict[str, float] = {}
+    if drafts:
+        out["drafts"] = drafts
+    if draft_tokens:
+        out["draft_tokens"] = draft_tokens
+    if accepted is not None:
+        out["accepted_tokens"] = accepted
+    if draft_tokens and accepted is not None:
+        out["acceptance_rate"] = 100.0 * accepted / draft_tokens
+    if drafts and accepted is not None:
+        out["acceptance_length"] = 1.0 + accepted / drafts
+    return out
+
+
 def run_one(args: argparse.Namespace, n_spec: int) -> dict[str, float]:
     label = f"{args.label_prefix}_k{n_spec}"
     env = dict(os.environ, PORT=str(args.port))
@@ -110,6 +154,9 @@ def run_one(args: argparse.Namespace, n_spec: int) -> dict[str, float]:
         combined = proc.stdout + proc.stderr
         sys.stdout.write(proc.stdout)
         metrics = parse_metrics(combined)
+        # Acceptance counters live on the server, not in the bench output;
+        # scrape them while the server is still up.
+        metrics.update(fetch_spec_metrics(args.port))
         metrics["num_spec_tokens"] = float(n_spec)
         return metrics
     finally:
@@ -141,7 +188,8 @@ def main() -> int:
         sys.exit("ERROR: no successful benchmark runs.")
 
     cols = ["num_spec_tokens", "output_tok_s", "total_tok_s",
-            "mean_tpot_ms", "mean_ttft_ms", "acceptance_rate", "acceptance_length"]
+            "mean_tpot_ms", "mean_ttft_ms", "acceptance_rate",
+            "acceptance_length", "drafts", "draft_tokens", "accepted_tokens"]
     print("\n================= SWEEP SUMMARY =================")
     print("\t".join(cols))
     for r in rows:

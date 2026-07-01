@@ -27,7 +27,9 @@ NUM_SPEC_TOKENS=""
 PORT="${PORT:-8000}"
 HOST="${HOST:-0.0.0.0}"
 SEED="${SEED:-0}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+# Empty = use the model's default context length (matches the "out of the box"
+# reference benchmark conditions). Set MAX_MODEL_LEN=4096 to cap it explicitly.
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
 
 while [[ $# -gt 0 ]]; do
@@ -49,9 +51,11 @@ fi
 CMD=(vllm serve "$MODEL"
      --host "$HOST" --port "$PORT"
      --seed "$SEED"
-     --max-model-len "$MAX_MODEL_LEN"
      --gpu-memory-utilization "$GPU_MEM_UTIL"
      --no-enable-prefix-caching)   # keep prefix caching OFF for clean benchmarks
+if [[ -n "$MAX_MODEL_LEN" ]]; then
+  CMD+=(--max-model-len "$MAX_MODEL_LEN")
+fi
 
 # Enable EAGLE-3 speculative decoding when a draft head is provided.
 if [[ -n "$DRAFT_HEAD" ]]; then
