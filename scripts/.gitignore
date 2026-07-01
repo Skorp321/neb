@@ -1,0 +1,16 @@
+# Environments (do not submit)
+speculators_venv/
+vllm_venv/
+comp_venv/
+speculators/
+
+# Generated artifacts
+data/
+output/
+results/
+Qwen3-8B-FP8-Dynamic/
+.hf_home/
+
+# Python
+__pycache__/
+*.pyc
