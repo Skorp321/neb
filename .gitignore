@@ -2,6 +2,7 @@ hw3-nebius-124815-Skorp321.pem
 hw3-nebius-124815-Skorp321.pem.ppk
 .qodo
 .hf_home
+neb/scripts/logs
 neb/scripts/comp_venv
 neb/scripts/data
 neb/scripts/output
